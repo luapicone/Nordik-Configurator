@@ -7,13 +7,11 @@ Configurador interno de decks hecho en React + Vite.
 La interfaz fue simplificada para parecerse mas a una herramienta operativa que a una landing:
 
 - sin header comercial ni bloques de marketing
-- seleccion directa de material
-- selector simple de forma
-- carga de medidas base y recortes
-- plano superior del deck
-- trazado manual de lineas de medicion sobre el plano
-- resumen final con superficie, cantidades y estimacion
-- copia rapida del resultado
+- arranque en blanco
+- dibujo libre de la forma del deck por puntos y lineas
+- cierre manual de la forma cuando el trazado esta listo
+- seleccion de material recien despues de definir la geometria
+- visualizacion del deck aplicado sobre la forma trazada
 
 ## Desarrollo
 
