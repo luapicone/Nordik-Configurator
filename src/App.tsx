@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 import './App.css'
 
 type DeckShape = 'rectangle' | 'l-left' | 'l-right'
-type BoardPattern = 'straight' | 'diagonal' | 'chevron'
 
 type Material = {
   id: string
@@ -20,6 +20,17 @@ type Material = {
   edgeColor: string
 }
 
+type Point = {
+  x: number
+  y: number
+}
+
+type MeasurementLine = {
+  id: number
+  start: Point
+  end: Point
+}
+
 const materials: Material[] = [
   {
     id: 'graphite',
@@ -33,7 +44,7 @@ const materials: Material[] = [
     clipUnitPrice: 0.62,
     joistSpacingM: 0.4,
     boardColor: '#4f565d',
-    accentColor: '#9ca7b5',
+    accentColor: '#8e99a7',
     edgeColor: '#2f3439',
   },
   {
@@ -48,7 +59,7 @@ const materials: Material[] = [
     clipUnitPrice: 0.68,
     joistSpacingM: 0.38,
     boardColor: '#8b5a3c',
-    accentColor: '#d4a17f',
+    accentColor: '#ca9574',
     edgeColor: '#5f3d28',
   },
   {
@@ -62,28 +73,20 @@ const materials: Material[] = [
     subframeSqm: 35,
     clipUnitPrice: 0.7,
     joistSpacingM: 0.38,
-    boardColor: '#cac1b2',
-    accentColor: '#f2ebdd',
-    edgeColor: '#998d7e',
+    boardColor: '#cbc3b5',
+    accentColor: '#f4ecdf',
+    edgeColor: '#9a8f82',
   },
 ]
 
 const shapeLabels: Record<DeckShape, string> = {
-  rectangle: 'Rectangular',
-  'l-left': 'L shape left',
-  'l-right': 'L shape right',
-}
-
-const patternLabels: Record<BoardPattern, string> = {
-  straight: 'Straight laid',
-  diagonal: 'Diagonal',
-  chevron: 'Chevron',
+  rectangle: 'Recto',
+  'l-left': 'L izquierda',
+  'l-right': 'L derecha',
 }
 
 const extrasPricing = {
-  lightingPerStep: 86,
-  skirtingPerMeter: 16,
-  stairFlight: 620,
+  borderPerMeter: 16,
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -98,60 +101,78 @@ function formatCurrency(value: number) {
   }).format(value)
 }
 
-function isoProject([x, y]: [number, number]) {
-  const isoX = (x - y) * 62
-  const isoY = (x + y) * 30
-  return [isoX, isoY] as const
+function formatMeters(value: number) {
+  return `${value.toFixed(2)} m`
+}
+
+function pointDistance(start: Point, end: Point) {
+  return Math.hypot(end.x - start.x, end.y - start.y)
 }
 
 function topPolygonPoints(shape: DeckShape, width: number, depth: number, notchWidth: number, notchDepth: number) {
   if (shape === 'rectangle') {
     return [
-      [0, 0],
-      [width, 0],
-      [width, depth],
-      [0, depth],
-    ] as Array<[number, number]>
+      { x: 0, y: 0 },
+      { x: width, y: 0 },
+      { x: width, y: depth },
+      { x: 0, y: depth },
+    ]
   }
 
   if (shape === 'l-left') {
     return [
-      [0, 0],
-      [width, 0],
-      [width, depth],
-      [notchWidth, depth],
-      [notchWidth, notchDepth],
-      [0, notchDepth],
-    ] as Array<[number, number]>
+      { x: 0, y: 0 },
+      { x: width, y: 0 },
+      { x: width, y: depth },
+      { x: notchWidth, y: depth },
+      { x: notchWidth, y: notchDepth },
+      { x: 0, y: notchDepth },
+    ]
   }
 
   return [
-    [0, 0],
-    [width, 0],
-    [width, notchDepth],
-    [width - notchWidth, notchDepth],
-    [width - notchWidth, depth],
-    [0, depth],
-  ] as Array<[number, number]>
+    { x: 0, y: 0 },
+    { x: width, y: 0 },
+    { x: width, y: notchDepth },
+    { x: width - notchWidth, y: notchDepth },
+    { x: width - notchWidth, y: depth },
+    { x: 0, y: depth },
+  ]
 }
 
-function polygonToPath(points: Array<[number, number]>) {
-  return points.map(([x, y], index) => `${index === 0 ? 'M' : 'L'} ${x},${y}`).join(' ') + ' Z'
+function polygonToPath(points: Point[]) {
+  return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ') + ' Z'
+}
+
+function getBounds(points: Point[]) {
+  return points.reduce(
+    (acc, point) => ({
+      minX: Math.min(acc.minX, point.x),
+      maxX: Math.max(acc.maxX, point.x),
+      minY: Math.min(acc.minY, point.y),
+      maxY: Math.max(acc.maxY, point.y),
+    }),
+    {
+      minX: Number.POSITIVE_INFINITY,
+      maxX: Number.NEGATIVE_INFINITY,
+      minY: Number.POSITIVE_INFINITY,
+      maxY: Number.NEGATIVE_INFINITY,
+    },
+  )
 }
 
 function App() {
   const [shape, setShape] = useState<DeckShape>('rectangle')
-  const [pattern, setPattern] = useState<BoardPattern>('straight')
   const [materialId, setMaterialId] = useState('graphite')
   const [width, setWidth] = useState(5.8)
   const [depth, setDepth] = useState(3.6)
   const [notchWidth, setNotchWidth] = useState(2)
   const [notchDepth, setNotchDepth] = useState(1.7)
-  const [steps, setSteps] = useState(1)
-  const [lighting, setLighting] = useState(true)
-  const [skirting, setSkirting] = useState(true)
-  const [stairs, setStairs] = useState(false)
+  const [measurementLines, setMeasurementLines] = useState<MeasurementLine[]>([])
+  const [draftLineStart, setDraftLineStart] = useState<Point | null>(null)
+  const [draftLineEnd, setDraftLineEnd] = useState<Point | null>(null)
   const [copied, setCopied] = useState(false)
+  const svgRef = useRef<SVGSVGElement | null>(null)
 
   const material = materials.find((entry) => entry.id === materialId) ?? materials[0]
   const resolvedNotchWidth = clamp(notchWidth, 0.8, width - 0.8)
@@ -159,99 +180,122 @@ function App() {
   const cutoutArea = shape === 'rectangle' ? 0 : resolvedNotchWidth * resolvedNotchDepth
   const grossArea = width * depth
   const netArea = grossArea - cutoutArea
-
-  const perimeter =
-    shape === 'rectangle'
-      ? 2 * (width + depth)
-      : 2 * (width + depth)
-
-  const wasteFactor =
-    pattern === 'straight' ? 1.08 : pattern === 'diagonal' ? 1.14 : 1.17
-  const boardCoverWidthM = (material.boardWidthMm + material.gapMm) / 1000
+  const perimeter = shape === 'rectangle' ? 2 * (width + depth) : 2 * (width + depth)
+  const wasteFactor = 1.08
   const boardLinearMeters = (netArea / (material.boardWidthMm / 1000)) * wasteFactor
   const boardUnits = Math.ceil(boardLinearMeters / material.boardLengthM)
   const joistLinearMeters = Math.ceil((netArea / material.joistSpacingM) * 1.08)
   const clipUnits = Math.ceil(netArea / ((material.boardWidthMm / 1000) * material.joistSpacingM))
-
   const boardCost = netArea * material.priceSqm
   const frameCost = netArea * material.subframeSqm
   const clipCost = clipUnits * material.clipUnitPrice
-  const skirtingCost = skirting ? perimeter * extrasPricing.skirtingPerMeter : 0
-  const lightingCost = lighting ? steps * extrasPricing.lightingPerStep : 0
-  const stairCost = stairs ? extrasPricing.stairFlight : 0
-  const totalCost = boardCost + frameCost + clipCost + skirtingCost + lightingCost + stairCost
+  const borderCost = perimeter * extrasPricing.borderPerMeter
+  const totalCost = boardCost + frameCost + clipCost + borderCost
 
-  const topPoints = topPolygonPoints(shape, width, depth, resolvedNotchWidth, resolvedNotchDepth)
-  const projectedTop = topPoints.map(isoProject)
-  const minX = Math.min(...projectedTop.map(([x]) => x))
-  const maxX = Math.max(...projectedTop.map(([x]) => x))
-  const minY = Math.min(...projectedTop.map(([, y]) => y))
-  const maxY = Math.max(...projectedTop.map(([, y]) => y))
-  const heightOffset = 42
-  const normalizedTop = projectedTop.map(([x, y]) => [x - minX + 60, y - minY + 50] as [number, number])
-  const loweredTop = normalizedTop.map(([x, y]) => [x, y + heightOffset] as [number, number])
-
-  const topFacePath = polygonToPath(normalizedTop)
-  const frontFacePath = polygonToPath([
-    normalizedTop[projectedTop.length - 1],
-    normalizedTop[projectedTop.length - 2],
-    loweredTop[projectedTop.length - 2],
-    loweredTop[projectedTop.length - 1],
-  ])
-  const sideFacePath = polygonToPath([
-    normalizedTop[1],
-    normalizedTop[2],
-    loweredTop[2],
-    loweredTop[1],
-  ])
-
-  const boardGuideLines = Array.from({ length: Math.max(8, Math.floor(netArea * 1.2)) }, (_, index) => {
-    const progress = index / Math.max(1, Math.floor(netArea * 1.2))
-    const widthSpan = maxX - minX + 80
-    const left = 15 + progress * widthSpan
-
-    if (pattern === 'straight') {
-      return {
-        x1: left,
-        y1: 32,
-        x2: left - 82,
-        y2: maxY - minY + 124,
-      }
+  const planGeometry = useMemo(() => {
+    const points = topPolygonPoints(shape, width, depth, resolvedNotchWidth, resolvedNotchDepth)
+    const bounds = getBounds(points)
+    const padding = 1.1
+    const viewBox = {
+      x: bounds.minX - padding,
+      y: bounds.minY - padding,
+      width: bounds.maxX - bounds.minX + padding * 2,
+      height: bounds.maxY - bounds.minY + padding * 2,
     }
 
-    if (pattern === 'diagonal') {
+    const boardGuideLines = Array.from({ length: Math.max(8, Math.ceil(width / 0.18)) }, (_, index) => {
+      const x = (index + 1) * (width / (Math.max(8, Math.ceil(width / 0.18)) + 1))
       return {
-        x1: left - 20,
-        y1: 20,
-        x2: left + 64,
-        y2: maxY - minY + 128,
+        x1: x,
+        y1: -0.4,
+        x2: x,
+        y2: depth + 0.4,
       }
-    }
+    })
 
-    const offset = index % 2 === 0 ? -28 : 28
     return {
-      x1: left + offset,
-      y1: 18,
-      x2: left - offset,
-      y2: maxY - minY + 132,
+      points,
+      path: polygonToPath(points),
+      viewBox,
+      boardGuideLines,
+      bounds,
     }
-  })
+  }, [depth, resolvedNotchDepth, resolvedNotchWidth, shape, width])
+
+  function getSvgPoint(event: ReactPointerEvent<SVGSVGElement>) {
+    const svg = svgRef.current
+    if (!svg) {
+      return null
+    }
+
+    const point = svg.createSVGPoint()
+    point.x = event.clientX
+    point.y = event.clientY
+    const matrix = svg.getScreenCTM()
+
+    if (!matrix) {
+      return null
+    }
+
+    const transformedPoint = point.matrixTransform(matrix.inverse())
+    return {
+      x: transformedPoint.x,
+      y: transformedPoint.y,
+    }
+  }
+
+  function handleBoardPointerMove(event: ReactPointerEvent<SVGSVGElement>) {
+    if (!draftLineStart) {
+      return
+    }
+
+    const point = getSvgPoint(event)
+    if (!point) {
+      return
+    }
+
+    setDraftLineEnd(point)
+  }
+
+  function handleBoardClick(event: ReactPointerEvent<SVGSVGElement>) {
+    const point = getSvgPoint(event)
+    if (!point) {
+      return
+    }
+
+    if (!draftLineStart) {
+      setDraftLineStart(point)
+      setDraftLineEnd(point)
+      return
+    }
+
+    setMeasurementLines((current) => [
+      ...current,
+      {
+        id: Date.now(),
+        start: draftLineStart,
+        end: point,
+      },
+    ])
+    setDraftLineStart(null)
+    setDraftLineEnd(null)
+  }
 
   async function handleCopySummary() {
     const lines = [
-      `Nordik Configurator`,
-      `Shape: ${shapeLabels[shape]}`,
-      `Dimensions: ${width.toFixed(1)}m x ${depth.toFixed(1)}m`,
+      'Nordik Configurator',
+      `Forma: ${shapeLabels[shape]}`,
+      `Medidas base: ${width.toFixed(2)}m x ${depth.toFixed(2)}m`,
       shape === 'rectangle'
         ? null
-        : `Cutout: ${resolvedNotchWidth.toFixed(1)}m x ${resolvedNotchDepth.toFixed(1)}m`,
+        : `Recorte: ${resolvedNotchWidth.toFixed(2)}m x ${resolvedNotchDepth.toFixed(2)}m`,
       `Material: ${material.name}`,
-      `Pattern: ${patternLabels[pattern]}`,
-      `Deck area: ${netArea.toFixed(1)} sqm`,
-      `Boards: ${boardUnits} units (${material.boardLengthM}m)`,
+      `Superficie: ${netArea.toFixed(2)} m2`,
+      `Perimetro: ${perimeter.toFixed(2)} m`,
+      `Tablas: ${boardUnits} unidades`,
       `Joists: ${joistLinearMeters} lm`,
       `Clips: ${clipUnits}`,
-      `Estimated total: ${formatCurrency(totalCost)}`,
+      `Total estimado: ${formatCurrency(totalCost)}`,
     ].filter(Boolean)
 
     await navigator.clipboard.writeText(lines.join('\n'))
@@ -259,345 +303,313 @@ function App() {
     window.setTimeout(() => setCopied(false), 1800)
   }
 
+  const liveLine =
+    draftLineStart && draftLineEnd
+      ? {
+          start: draftLineStart,
+          end: draftLineEnd,
+        }
+      : null
+
   return (
-    <main className="app-shell">
-      <section className="hero-panel">
-        <div className="hero-copy">
-          <p className="eyebrow">Nordik exterior systems</p>
-          <h1>Deck configurator MVP with live geometry, quantities and estimate.</h1>
-          <p className="hero-text">
-            This prototype reproduces the core planner flow: define layout,
-            choose finish, inspect the deck visually and obtain a buildable
-            summary in real time.
-          </p>
+    <main className="internal-shell">
+      <aside className="panel controls-panel">
+        <div className="panel-heading">
+          <span className="panel-label">Interno</span>
+          <h1>Deck planner</h1>
         </div>
 
-        <div className="hero-stats">
-          <article>
-            <span>Area</span>
-            <strong>{netArea.toFixed(1)} sqm</strong>
-          </article>
-          <article>
-            <span>Boards</span>
-            <strong>{boardUnits}</strong>
-          </article>
-          <article>
-            <span>Estimate</span>
-            <strong>{formatCurrency(totalCost)}</strong>
-          </article>
-        </div>
-      </section>
-
-      <section className="workspace">
-        <aside className="controls-panel">
-          <div className="panel-header">
-            <p className="section-kicker">Configuration</p>
-            <h2>Build the deck</h2>
+        <section className="section-block">
+          <span className="field-label">Material</span>
+          <div className="material-stack">
+            {materials.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                className={entry.id === materialId ? 'material-row active' : 'material-row'}
+                onClick={() => setMaterialId(entry.id)}
+              >
+                <span
+                  className="material-swatch"
+                  style={{ background: `linear-gradient(135deg, ${entry.accentColor}, ${entry.boardColor})` }}
+                />
+                <span className="material-copy">
+                  <strong>{entry.name}</strong>
+                  <small>{entry.tone}</small>
+                </span>
+              </button>
+            ))}
           </div>
+        </section>
 
-          <div className="control-group">
-            <label>Shape</label>
-            <div className="segmented">
-              {Object.entries(shapeLabels).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={value === shape ? 'active' : ''}
-                  onClick={() => setShape(value as DeckShape)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+        <section className="section-block">
+          <span className="field-label">Forma</span>
+          <div className="segmented">
+            {Object.entries(shapeLabels).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={shape === value ? 'active' : ''}
+                onClick={() => setShape(value as DeckShape)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
+        </section>
 
-          <div className="two-col-grid">
-            <label>
-              Width
-              <input
-                type="range"
-                min="2.4"
-                max="9.2"
-                step="0.1"
-                value={width}
-                onChange={(event) => setWidth(Number(event.target.value))}
-              />
-              <span>{width.toFixed(1)} m</span>
-            </label>
-            <label>
-              Depth
-              <input
-                type="range"
-                min="2"
-                max="6.5"
-                step="0.1"
-                value={depth}
-                onChange={(event) => setDepth(Number(event.target.value))}
-              />
-              <span>{depth.toFixed(1)} m</span>
-            </label>
-          </div>
-
+        <section className="section-block compact-grid">
+          <label>
+            <span className="field-label">Ancho</span>
+            <input
+              type="number"
+              min="2.4"
+              max="9.2"
+              step="0.1"
+              value={width}
+              onChange={(event) => setWidth(Number(event.target.value))}
+            />
+          </label>
+          <label>
+            <span className="field-label">Profundidad</span>
+            <input
+              type="number"
+              min="2"
+              max="6.5"
+              step="0.1"
+              value={depth}
+              onChange={(event) => setDepth(Number(event.target.value))}
+            />
+          </label>
           {shape !== 'rectangle' && (
-            <div className="two-col-grid">
+            <>
               <label>
-                Cutout width
+                <span className="field-label">Recorte ancho</span>
                 <input
-                  type="range"
+                  type="number"
                   min="0.8"
                   max={Math.max(1.2, width - 0.8)}
                   step="0.1"
                   value={resolvedNotchWidth}
                   onChange={(event) => setNotchWidth(Number(event.target.value))}
                 />
-                <span>{resolvedNotchWidth.toFixed(1)} m</span>
               </label>
               <label>
-                Cutout depth
+                <span className="field-label">Recorte prof.</span>
                 <input
-                  type="range"
+                  type="number"
                   min="0.8"
                   max={Math.max(1.2, depth - 0.8)}
                   step="0.1"
                   value={resolvedNotchDepth}
                   onChange={(event) => setNotchDepth(Number(event.target.value))}
                 />
-                <span>{resolvedNotchDepth.toFixed(1)} m</span>
               </label>
-            </div>
+            </>
           )}
-
-          <div className="control-group">
-            <label>Material</label>
-            <div className="material-list">
-              {materials.map((entry) => (
-                <button
-                  key={entry.id}
-                  type="button"
-                  className={entry.id === materialId ? 'material-card active' : 'material-card'}
-                  onClick={() => setMaterialId(entry.id)}
-                >
-                  <span
-                    className="swatch"
-                    style={{ background: `linear-gradient(135deg, ${entry.accentColor}, ${entry.boardColor})` }}
-                  />
-                  <strong>{entry.name}</strong>
-                  <small>{entry.tone}</small>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="control-group">
-            <label>Board pattern</label>
-            <div className="segmented">
-              {Object.entries(patternLabels).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={value === pattern ? 'active' : ''}
-                  onClick={() => setPattern(value as BoardPattern)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="control-group">
-            <label>Accessories</label>
-            <div className="toggle-list">
-              <label className="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={lighting}
-                  onChange={(event) => setLighting(event.target.checked)}
-                />
-                <span>Step lighting</span>
-              </label>
-              <label className="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={skirting}
-                  onChange={(event) => setSkirting(event.target.checked)}
-                />
-                <span>Perimeter skirting</span>
-              </label>
-              <label className="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={stairs}
-                  onChange={(event) => setStairs(event.target.checked)}
-                />
-                <span>Single stair flight</span>
-              </label>
-            </div>
-          </div>
-
-          <label className="stepper">
-            Entry steps
-            <input
-              type="range"
-              min="1"
-              max="5"
-              step="1"
-              value={steps}
-              onChange={(event) => setSteps(Number(event.target.value))}
-            />
-            <span>{steps} step(s)</span>
-          </label>
-        </aside>
-
-        <section className="preview-panel">
-          <div className="panel-header">
-            <p className="section-kicker">Preview</p>
-            <h2>{material.name}</h2>
-          </div>
-
-          <div className="visual-stage">
-            <div className="stage-glow" />
-            <svg
-              className="deck-svg"
-              viewBox={`0 0 ${Math.max(420, maxX - minX + 180)} ${Math.max(320, maxY - minY + 210)}`}
-              role="img"
-              aria-label="Isometric deck preview"
-            >
-              <defs>
-                <linearGradient id="top-face" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor={material.accentColor} />
-                  <stop offset="100%" stopColor={material.boardColor} />
-                </linearGradient>
-                <linearGradient id="front-face" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop offset="0%" stopColor={material.boardColor} />
-                  <stop offset="100%" stopColor={material.edgeColor} />
-                </linearGradient>
-              </defs>
-
-              <path d={frontFacePath} fill="url(#front-face)" opacity="0.92" />
-              <path d={sideFacePath} fill={material.edgeColor} opacity="0.96" />
-              <path d={topFacePath} fill="url(#top-face)" stroke="rgba(255,255,255,0.25)" strokeWidth="2" />
-
-              <clipPath id="deck-clip">
-                <path d={topFacePath} />
-              </clipPath>
-
-              <g clipPath="url(#deck-clip)" opacity="0.72">
-                {boardGuideLines.map((line, index) => (
-                  <line
-                    key={`${pattern}-${index}`}
-                    {...line}
-                    stroke={index % 4 === 0 ? 'rgba(255,255,255,0.32)' : 'rgba(26,26,26,0.22)'}
-                    strokeWidth={index % 5 === 0 ? 4 : 2}
-                    strokeLinecap="round"
-                  />
-                ))}
-              </g>
-
-              {lighting &&
-                Array.from({ length: steps }, (_, index) => (
-                  <circle
-                    key={index}
-                    cx={92 + index * 26}
-                    cy={maxY - minY + 150}
-                    r="6"
-                    fill="#ffcf70"
-                    opacity="0.9"
-                  />
-                ))}
-            </svg>
-          </div>
-
-          <div className="summary-grid">
-            <article>
-              <span>Layout</span>
-              <strong>{shapeLabels[shape]}</strong>
-              <small>
-                {width.toFixed(1)}m x {depth.toFixed(1)}m
-              </small>
-            </article>
-            <article>
-              <span>Pattern</span>
-              <strong>{patternLabels[pattern]}</strong>
-              <small>Waste factor {Math.round((wasteFactor - 1) * 100)}%</small>
-            </article>
-            <article>
-              <span>Coverage</span>
-              <strong>{boardCoverWidthM.toFixed(3)} m</strong>
-              <small>Board + gap module</small>
-            </article>
-            <article>
-              <span>Perimeter</span>
-              <strong>{perimeter.toFixed(1)} lm</strong>
-              <small>For trims and skirting</small>
-            </article>
-          </div>
         </section>
 
-        <aside className="estimate-panel">
-          <div className="panel-header">
-            <p className="section-kicker">Takeoff</p>
-            <h2>Quantity + price</h2>
+        <section className="section-block">
+          <span className="field-label">Medicion manual</span>
+          <div className="action-row">
+            <button type="button" className="secondary-action" onClick={() => setMeasurementLines([])}>
+              Limpiar lineas
+            </button>
+            <button type="button" className="secondary-action" onClick={() => {
+              setDraftLineStart(null)
+              setDraftLineEnd(null)
+            }}>
+              Cancelar trazo
+            </button>
           </div>
+          <p className="helper-text">
+            Hace click en un punto del plano y despues en otro para trazar una distancia.
+          </p>
+        </section>
+      </aside>
 
-          <div className="estimate-card">
-            <div className="metric-row">
-              <span>Deck area</span>
-              <strong>{netArea.toFixed(1)} sqm</strong>
-            </div>
-            <div className="metric-row">
-              <span>Boards</span>
-              <strong>{boardUnits} units</strong>
-            </div>
-            <div className="metric-row">
-              <span>Board linear meters</span>
-              <strong>{boardLinearMeters.toFixed(1)} lm</strong>
-            </div>
-            <div className="metric-row">
-              <span>Joists</span>
-              <strong>{joistLinearMeters} lm</strong>
-            </div>
-            <div className="metric-row">
-              <span>Hidden clips</span>
-              <strong>{clipUnits}</strong>
-            </div>
+      <section className="panel board-panel">
+        <div className="panel-heading inline-heading">
+          <div>
+            <span className="panel-label">Plano</span>
+            <h2>{material.name}</h2>
           </div>
-
-          <div className="estimate-card cost-card">
-            <div className="metric-row">
-              <span>Boards</span>
-              <strong>{formatCurrency(boardCost)}</strong>
-            </div>
-            <div className="metric-row">
-              <span>Subframe</span>
-              <strong>{formatCurrency(frameCost)}</strong>
-            </div>
-            <div className="metric-row">
-              <span>Clips</span>
-              <strong>{formatCurrency(clipCost)}</strong>
-            </div>
-            <div className="metric-row">
-              <span>Skirting</span>
-              <strong>{formatCurrency(skirtingCost)}</strong>
-            </div>
-            <div className="metric-row">
-              <span>Lighting</span>
-              <strong>{formatCurrency(lightingCost)}</strong>
-            </div>
-            <div className="metric-row">
-              <span>Stairs</span>
-              <strong>{formatCurrency(stairCost)}</strong>
-            </div>
-            <div className="metric-row total">
-              <span>Total estimate</span>
-              <strong>{formatCurrency(totalCost)}</strong>
-            </div>
+          <div className="board-status">
+            <span>{formatMeters(width)}</span>
+            <span>{formatMeters(depth)}</span>
           </div>
+        </div>
 
-          <button type="button" className="primary-action" onClick={handleCopySummary}>
-            {copied ? 'Summary copied' : 'Copy quote summary'}
-          </button>
-        </aside>
+        <div className="plan-board">
+          <svg
+            ref={svgRef}
+            className="plan-svg"
+            viewBox={`${planGeometry.viewBox.x} ${planGeometry.viewBox.y} ${planGeometry.viewBox.width} ${planGeometry.viewBox.height}`}
+            role="img"
+            aria-label="Plano del deck"
+            onPointerMove={handleBoardPointerMove}
+            onClick={handleBoardClick}
+          >
+            <defs>
+              <pattern id="board-pattern" width="0.22" height="0.22" patternUnits="userSpaceOnUse">
+                <rect width="0.22" height="0.22" fill={material.boardColor} />
+                <rect x="0.18" width="0.02" height="0.22" fill={material.edgeColor} opacity="0.45" />
+              </pattern>
+              <clipPath id="deck-mask">
+                <path d={planGeometry.path} />
+              </clipPath>
+            </defs>
+
+            <rect
+              x={planGeometry.viewBox.x}
+              y={planGeometry.viewBox.y}
+              width={planGeometry.viewBox.width}
+              height={planGeometry.viewBox.height}
+              className="grid-backdrop"
+            />
+
+            <path d={planGeometry.path} fill="url(#board-pattern)" stroke={material.accentColor} strokeWidth="0.06" />
+
+            <g clipPath="url(#deck-mask)" opacity="0.52">
+              {planGeometry.boardGuideLines.map((line, index) => (
+                <line
+                  key={index}
+                  x1={line.x1}
+                  y1={line.y1}
+                  x2={line.x2}
+                  y2={line.y2}
+                  stroke="rgba(255,255,255,0.18)"
+                  strokeWidth="0.03"
+                />
+              ))}
+            </g>
+
+            <g className="dimension-line">
+              <line x1={0} y1={-0.55} x2={width} y2={-0.55} />
+              <line x1={0} y1={-0.35} x2={0} y2={0} />
+              <line x1={width} y1={-0.35} x2={width} y2={0} />
+              <text x={width / 2} y={-0.7} textAnchor="middle">
+                {formatMeters(width)}
+              </text>
+            </g>
+
+            <g className="dimension-line">
+              <line x1={width + 0.55} y1={0} x2={width + 0.55} y2={depth} />
+              <line x1={width} y1={0} x2={width + 0.35} y2={0} />
+              <line x1={width} y1={depth} x2={width + 0.35} y2={depth} />
+              <text x={width + 0.72} y={depth / 2} textAnchor="middle" transform={`rotate(90 ${width + 0.72} ${depth / 2})`}>
+                {formatMeters(depth)}
+              </text>
+            </g>
+
+            {measurementLines.map((line) => {
+              const midX = (line.start.x + line.end.x) / 2
+              const midY = (line.start.y + line.end.y) / 2
+              return (
+                <g key={line.id} className="measurement-group">
+                  <line x1={line.start.x} y1={line.start.y} x2={line.end.x} y2={line.end.y} className="measurement-segment" />
+                  <circle cx={line.start.x} cy={line.start.y} r="0.08" className="measurement-node" />
+                  <circle cx={line.end.x} cy={line.end.y} r="0.08" className="measurement-node" />
+                  <text x={midX} y={midY - 0.12} textAnchor="middle" className="measurement-label">
+                    {formatMeters(pointDistance(line.start, line.end))}
+                  </text>
+                </g>
+              )
+            })}
+
+            {liveLine && (
+              <g className="measurement-group draft">
+                <line x1={liveLine.start.x} y1={liveLine.start.y} x2={liveLine.end.x} y2={liveLine.end.y} className="measurement-segment" />
+                <circle cx={liveLine.start.x} cy={liveLine.start.y} r="0.08" className="measurement-node" />
+                <circle cx={liveLine.end.x} cy={liveLine.end.y} r="0.08" className="measurement-node" />
+                <text
+                  x={(liveLine.start.x + liveLine.end.x) / 2}
+                  y={(liveLine.start.y + liveLine.end.y) / 2 - 0.12}
+                  textAnchor="middle"
+                  className="measurement-label"
+                >
+                  {formatMeters(pointDistance(liveLine.start, liveLine.end))}
+                </text>
+              </g>
+            )}
+          </svg>
+        </div>
+
+        <div className="measurement-strip">
+          {measurementLines.length === 0 ? (
+            <span>Sin lineas medidas</span>
+          ) : (
+            measurementLines.map((line, index) => (
+              <span key={line.id}>
+                L{index + 1}: {formatMeters(pointDistance(line.start, line.end))}
+              </span>
+            ))
+          )}
+        </div>
       </section>
+
+      <aside className="panel result-panel">
+        <div className="panel-heading">
+          <span className="panel-label">Resultado final</span>
+          <h2>Resumen</h2>
+        </div>
+
+        <div className="result-stack">
+          <article className="result-card total-card">
+            <span>Total estimado</span>
+            <strong>{formatCurrency(totalCost)}</strong>
+          </article>
+
+          <article className="result-card">
+            <span>Superficie util</span>
+            <strong>{netArea.toFixed(2)} m2</strong>
+          </article>
+
+          <article className="result-card">
+            <span>Perimetro</span>
+            <strong>{perimeter.toFixed(2)} m</strong>
+          </article>
+
+          <article className="result-card">
+            <span>Tablas</span>
+            <strong>{boardUnits} un.</strong>
+            <small>{boardLinearMeters.toFixed(1)} lm</small>
+          </article>
+
+          <article className="result-card">
+            <span>Joists</span>
+            <strong>{joistLinearMeters} lm</strong>
+          </article>
+
+          <article className="result-card">
+            <span>Clips</span>
+            <strong>{clipUnits}</strong>
+          </article>
+        </div>
+
+        <div className="cost-breakdown">
+          <div className="cost-row">
+            <span>Decking</span>
+            <strong>{formatCurrency(boardCost)}</strong>
+          </div>
+          <div className="cost-row">
+            <span>Subestructura</span>
+            <strong>{formatCurrency(frameCost)}</strong>
+          </div>
+          <div className="cost-row">
+            <span>Clips</span>
+            <strong>{formatCurrency(clipCost)}</strong>
+          </div>
+          <div className="cost-row">
+            <span>Terminacion borde</span>
+            <strong>{formatCurrency(borderCost)}</strong>
+          </div>
+        </div>
+
+        <button type="button" className="primary-action" onClick={handleCopySummary}>
+          {copied ? 'Resumen copiado' : 'Copiar resultado'}
+        </button>
+      </aside>
     </main>
   )
 }

@@ -1,54 +1,28 @@
 # Nordik Configurator
 
-MVP web configurator for composite decks, built in React + Vite.
+Configurador interno de decks hecho en React + Vite.
 
-## Included in this version
+## Estado actual
 
-- Live deck configuration by shape:
-  - rectangular
-  - L left
-  - L right
-- Parametric dimensions with cutout controls for L layouts
-- Material presets with different board widths, colors and pricing
-- Board pattern selection:
-  - straight
-  - diagonal
-  - chevron
-- Isometric visual preview
-- Automatic takeoff:
-  - deck area
-  - board units
-  - board linear meters
-  - joist linear meters
-  - hidden clips
-- Live price estimate with accessories:
-  - skirting
-  - lighting
-  - stairs
-- Quote summary copy action
+La interfaz fue simplificada para parecerse mas a una herramienta operativa que a una landing:
 
-## Scope note
+- sin header comercial ni bloques de marketing
+- seleccion directa de material
+- selector simple de forma
+- carga de medidas base y recortes
+- plano superior del deck
+- trazado manual de lineas de medicion sobre el plano
+- resumen final con superficie, cantidades y estimacion
+- copia rapida del resultado
 
-This is a serious functional MVP, not yet a full commercial-grade planner like a mature proprietary configurator.
-
-What is still missing for a full product:
-
-- true 3D camera controls
-- exact CAD-grade geometry rules
-- product catalog from backend
-- persistent projects and user accounts
-- PDF proposal generation
-- CRM / ecommerce integration
-- exact structural engineering validation
-
-## Development
+## Desarrollo
 
 ```bash
 npm install
 npm run dev
 ```
 
-## Production build
+## Build
 
 ```bash
 npm run build
